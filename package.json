@@ -1,0 +1,56 @@
+{
+  "name": "@voxelkloud/format-copc",
+  "version": "0.1.0",
+  "description": "The COPC driver for voxelkloud: one LAS 1.4 file, laszip chunks arranged as an octree, hierarchy pages in an EVLR \u2014 streamed by HTTP Range with no conversion step.",
+  "license": "MIT",
+  "keywords": [
+    "point-cloud",
+    "lidar",
+    "copc",
+    "laz",
+    "las",
+    "octree",
+    "webgpu"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voxelkloud/format-copc.git"
+  },
+  "homepage": "https://github.com/voxelkloud/voxelkloud",
+  "bugs": {
+    "url": "https://github.com/voxelkloud/voxelkloud/issues"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@voxelkloud/core": "workspace:*",
+    "@voxelkloud/format-las": "workspace:*",
+    "@voxelkloud/wasm-codecs": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
