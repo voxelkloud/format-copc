@@ -48,6 +48,37 @@ async function bodySnippet(res: Response): Promise<string> {
 }
 
 /**
+ * Whether a 206 shorter than the request is an error.
+ *
+ * For a range derived from the file's OWN offsets it is: the file is shorter
+ * than it claims to be, and reading a node's points from it would hand a
+ * truncated buffer to the decoder. For a speculative read — "the first 8 KiB,
+ * however much that turns out to be" — it is not an error at all; see
+ * {@link fetchHead}.
+ */
+type ShortRead = "reject" | "accept-at-eof";
+
+/**
+ * The end of the file, per `Content-Range`, or `undefined` if it did not say.
+ *
+ * The header reads `bytes <first>-<last>/<total>`, and `total` may be `*` when
+ * the origin does not know it. Without a total there is no way to tell a file
+ * that ended from a host that truncates, and this returns `undefined` rather
+ * than guessing — the caller then treats the short read as the error it might
+ * be.
+ */
+function eofFrom(res: Response): { last: number; total: number } | undefined {
+  const raw = res.headers.get("content-range");
+  if (raw === null) return undefined;
+  const m = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(raw.trim());
+  if (m === null) return undefined;
+  const last = Number(m[2]);
+  const total = Number(m[3]);
+  if (!Number.isFinite(last) || !Number.isFinite(total)) return undefined;
+  return { last, total };
+}
+
+/**
  * Read `[offset, offset + length)` of a file.
  *
  * A server that ignores `Range` and answers 200 with the whole file is
@@ -62,6 +93,7 @@ export async function fetchRange(
   offset: number,
   length: number,
   signal: AbortSignal | undefined,
+  shortRead: ShortRead = "reject",
 ): Promise<Uint8Array> {
   if (length <= 0) return new Uint8Array(0);
   // `bytes=X-(X-1)` is a range RFC 9110 says an origin IGNORES, answering 200
@@ -125,6 +157,12 @@ export async function fetchRange(
     if (whole.byteLength >= offset + length) {
       return whole.subarray(offset, offset + length);
     }
+    // O MESMO caso do 206 curto, pela outra porta: um host que ignora `Range`
+    // devolve o arquivo inteiro, e o arquivo inteiro é menor que a sondagem.
+    // Aqui não é preciso `Content-Range` para o provar — este corpo É o arquivo.
+    if (shortRead === "accept-at-eof" && offset < whole.byteLength) {
+      return whole.subarray(offset);
+    }
     throw new VoxelkloudError(
       "range-request-unsupported",
       `${url} answered 200 to a Range request with ${whole.byteLength} bytes, ` +
@@ -143,6 +181,26 @@ export async function fetchRange(
     );
   }
   if (buffer.byteLength !== length) {
+    /*
+     * A SHORT 206 IS NOT AUTOMATICALLY A BROKEN HOST.
+     *
+     * RFC 9110 says a range whose end runs past the file is satisfied by what
+     * exists: asked for `bytes=0-8191` of a 1410-byte file, a CORRECT server
+     * answers 206 with 1410 bytes and `Content-Range: bytes 0-1409/1410`.
+     * Treating that as broken made every COPC smaller than the 8 KiB head probe
+     * unreadable — and because one failed layer rejects the whole `Promise.all`
+     * that loads a project, a single tiny tile made the entire project
+     * impossible to open. Measured on the Garopaba TLS: three of six blocks are
+     * under 8 KiB, and they took the other three and the aerial survey with them.
+     *
+     * The proof required is the origin's own `Content-Range`. Without it — a
+     * missing header, or a `*` total — there is no way to separate a file that
+     * ended from a host that truncates, and the error below stands.
+     */
+    const eof = eofFrom(res);
+    const reached = eof !== undefined && eof.last === eof.total - 1;
+    const exact = eof !== undefined && buffer.byteLength === eof.last - offset + 1;
+    if (shortRead === "accept-at-eof" && reached && exact) return buffer;
     throw new VoxelkloudError(
       "range-request-unsupported",
       `${url} answered 206 to ${range} with ${buffer.byteLength} bytes instead ` +
@@ -151,4 +209,27 @@ export async function fetchRange(
     );
   }
   return buffer;
+}
+
+/**
+ * The first `atMost` bytes of a file, or all of it when it is smaller.
+ *
+ * A DIFFERENT QUESTION from {@link fetchRange}, which is why it has its own
+ * name. The head probe does not know how much of the file it needs — it guesses
+ * a size that covers the header and the VLR directory of almost every COPC, and
+ * reads again when the guess was short. "However much of the first 8 KiB
+ * exists" is a well-formed request; "the 8192 bytes at offset 0" is not, for a
+ * file with 1410 of them.
+ *
+ * Keeping this separate is what lets a short read stay an ERROR everywhere
+ * else: a node's byte range comes from the file's own offsets, and getting less
+ * than it asked for there means the file is truncated, not small.
+ */
+export function fetchHead(
+  transport: PointCloudTransport,
+  url: string,
+  atMost: number,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array> {
+  return fetchRange(transport, url, 0, atMost, signal, "accept-at-eof");
 }

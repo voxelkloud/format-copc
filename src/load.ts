@@ -28,7 +28,7 @@ import {
   copcCube,
   parseCopcInfo,
 } from "./copc-info.js";
-import { fetchRange } from "./range.js";
+import { fetchHead } from "./range.js";
 import type { CopcSource, CopcWarning, CopcWarningCode } from "./types.js";
 
 /**
@@ -79,20 +79,19 @@ export async function loadCopcSource(
     warnings.push({ code, path, message });
   };
 
-  let head = await fetchRange(
-    transport,
-    url,
-    0,
-    HEAD_BYTES,
-    options.signal,
-  );
+  // `fetchHead` e não `fetchRange`: os 8 KiB são um PALPITE que cobre o
+  // cabeçalho e o diretório de VLRs de quase todo COPC, não um intervalo que o
+  // arquivo prometeu ter. Num arquivo menor que isso — um ladrilho de umas
+  // centenas de pontos — pedir 8192 bytes exatos falhava, e o arquivo era
+  // perfeitamente válido.
+  let head = await fetchHead(transport, url, HEAD_BYTES, options.signal);
   let header = readLasHeader(head);
   if (!header.vlrsComplete) {
     // The VLR directory ran past the first read. Its true end is declared, so
     // the second read is exact rather than another guess.
     const need = Math.min(header.offsetToPointData, WIDE_HEAD_BYTES);
     header.free();
-    head = await fetchRange(transport, url, 0, need, options.signal);
+    head = await fetchHead(transport, url, need, options.signal);
     header = readLasHeader(head);
     if (!header.vlrsComplete) {
       header.free();

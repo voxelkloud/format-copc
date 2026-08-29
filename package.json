@@ -1,6 +1,6 @@
 {
   "name": "@voxelkloud/format-copc",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "The COPC driver for voxelkloud: one LAS 1.4 file, laszip chunks arranged as an octree, hierarchy pages in an EVLR \u2014 streamed by HTTP Range with no conversion step.",
   "license": "MIT",
   "keywords": [
