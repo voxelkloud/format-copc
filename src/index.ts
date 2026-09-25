@@ -17,6 +17,8 @@ export { openCopcTree, parseHierarchyPage } from "./hierarchy.js";
 export type { OpenCopcTreeOptions } from "./hierarchy.js";
 export { openCopcPoints } from "./points-reader.js";
 export type { CopcPointReader } from "./points-reader.js";
+export { DecodePool, decodeWorkersAvailable } from "./decode-pool.js";
+export type { DecodePoolOptions } from "./decode-pool.js";
 export {
   COPC_ENTRY_SIZE,
   COPC_HIERARCHY_RECORD_ID,

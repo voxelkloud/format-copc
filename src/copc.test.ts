@@ -13,6 +13,9 @@ import { copcFormat } from "./format.js";
 import { loadCopcSource } from "./load.js";
 import { openCopcTree } from "./hierarchy.js";
 import { openCopcPoints } from "./points-reader.js";
+import { fetchRange } from "./range.js";
+import { decodeLasRecords } from "@voxelkloud/format-las";
+import { LazChunkDecoder, LazField } from "@voxelkloud/wasm-codecs";
 import type { CopcNodePayload, CopcSource } from "./types.js";
 
 const FILE = new URL(
@@ -214,6 +217,61 @@ describe.skipIf(!HAS_FILE)("openCopcTree", () => {
 });
 
 describe.skipIf(!HAS_FILE)("openCopcPoints", () => {
+  /**
+   * THE GUARD ON THE SELECTIVE PATH, and it is the only test that can catch
+   * the way that path fails.
+   *
+   * `decodeSelective` does not zero what it skips: an unselected field holds
+   * the FIRST POINT'S value repeated, because laszip stores that one raw and
+   * carries it forward. So a mask that is one bit short of what the plan reads
+   * produces a node that is the right size, the right shape, and quietly
+   * constant in one dimension — a cloud that is all one colour, or all one
+   * class, with nothing thrown and nothing logged. Comparing against the full
+   * decode is the only way to see it.
+   */
+  it("decodes the same bytes selectively as it does in full", async () => {
+    const tree = await openCopcTree(source);
+    const reader = openCopcPoints(source, { computeBounds: true });
+    const root = tree.root as PagedOctreeNode<CopcNodePayload>;
+
+    // The mask must actually be narrower than ALL, or this test passes by
+    // proving that two full decodes agree.
+    expect(reader.lazSelection).not.toBe(LazField.ALL);
+
+    const selective = await reader.read(root);
+    const chunk = await fetchRange(
+      source.transport,
+      source.url,
+      root.payload!.offset,
+      root.payload!.byteSize,
+      undefined,
+    );
+    const decoder = new LazChunkDecoder(source.laszipRecord);
+    const full = decodeLasRecords(
+      reader.plan,
+      root,
+      decoder.decode(chunk, root.numPoints),
+      { computeBounds: true },
+    );
+    decoder.free();
+
+    expect(selective.numPoints).toBe(full.numPoints);
+    expect(Array.from(selective.positions)).toEqual(Array.from(full.positions));
+    expect(Array.from(selective.colors!.array)).toEqual(
+      Array.from(full.colors!.array),
+    );
+    expect(selective.bounds).toEqual(full.bounds);
+    for (const [name, attribute] of full.attributesByName) {
+      const mine = selective.attributesByName.get(name);
+      expect(mine, `attribute ${name} is missing`).toBeDefined();
+      expect(Array.from(mine!.array), `attribute ${name} differs`).toEqual(
+        Array.from(attribute.array),
+      );
+    }
+    tree.dispose();
+    reader.dispose?.();
+  });
+
   it("decodes the root node into the neutral shape", async () => {
     const tree = await openCopcTree(source);
     const reader = openCopcPoints(source, { computeBounds: true });
